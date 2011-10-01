@@ -9,6 +9,7 @@
 /sbin/busybox ln -s /sbin/recovery /sbin/nandroid
 /sbin/busybox ln -s /sbin/recovery /sbin/reboot
 /sbin/busybox ln -s /sbin/recovery /sbin/unyaffs
+/sbin/busybox cp -f /res/sbin/* /sbin/
 # Fix permissions in /sbin, just in case
 /sbin/busybox chmod 755 /sbin/*
 # Fix screwy ownerships

@@ -6,8 +6,8 @@ rm -f .tmp_quiet_recordmcount
 mkdir -p include/linux include/config
 make -f scripts/Makefile.build obj=scripts/kconfig eg30Plus_defconfig
   gcc -Wp,-MD,scripts/kconfig/.conf.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer   -DCURSES_LOC="<curses.h>" -DLOCALE   -c -o scripts/kconfig/conf.o scripts/kconfig/conf.c
-  gcc -Wp,-MD,scripts/kconfig/.kxgettext.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer   -DCURSES_LOC="<curses.h>" -DLOCALE   -c -o scripts/kconfig/kxgettext.o scripts/kconfig/kxgettext.c
   cat scripts/kconfig/zconf.tab.c_shipped > scripts/kconfig/zconf.tab.c
+  gcc -Wp,-MD,scripts/kconfig/.kxgettext.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer   -DCURSES_LOC="<curses.h>" -DLOCALE   -c -o scripts/kconfig/kxgettext.o scripts/kconfig/kxgettext.c
   cat scripts/kconfig/lex.zconf.c_shipped > scripts/kconfig/lex.zconf.c
   cat scripts/kconfig/zconf.hash.c_shipped > scripts/kconfig/zconf.hash.c
   gcc -Wp,-MD,scripts/kconfig/.zconf.tab.o.d -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer   -DCURSES_LOC="<curses.h>" -DLOCALE  -Iscripts/kconfig -c -o scripts/kconfig/zconf.tab.o scripts/kconfig/zconf.tab.c
