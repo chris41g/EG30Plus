@@ -5,15 +5,12 @@ busybox mount -o remount,rw /dev/block/mmcblk0p9 /system
 busybox --install -s /system/bin
 busybox --install -s /system/xbin
 busybox ln -s /sbin/busybox /system/bin/busybox
-busybox -p mkdir /plus
-busybox mount -o size=30k -t tmpfs tmpfs /plus
-busybox cat /sbin/su > /plus/su
-chmod 06755 /plus/su
+chmod 06755 /sbin/su
 busybox rm /system/bin/su
 busybox rm /system/xbin/su
 busybox rm /system/bin/jk-su
-busybox ln -s /plus/su /system/bin/su
-busybox ln -s /plus/su /system/xbin/su
+busybox cp -f /sbin/su /system/bin/su
+busybox ln -s /system/bin/su /system/xbin/su
 busybox rm -rf /bin/su
 busybox rm -rf /sbin/su
 
@@ -27,9 +24,9 @@ if [ ! -f "/system/app/Superuser.apk" ] && [ ! -f "/data/app/Superuser.apk" ] &&
 	#if [ -f "/system/app/FreeHDGameDemos.apk" ]; then
 	#	busybox rm /system/app/FreeHDGameDemos.apk
 	#fi
- 	busybox cp /sbin/Superuser.apk /system/app/Superuser.apk
+ 	busybox cp /sbin/superuser.apk /system/app/superuser.apk
  fi
-busybox rm /sbin/Superuser.apk
+busybox rm /sbin/superuser.apk
 sync
 # Enable init.d support
 if [ -d /system/etc/init.d ]

@@ -877,9 +877,8 @@ service playsound /system/bin/playsound
 #    oneshot
 
 # Custom Script Configuration
-service userscript /system/bin/sh /bin/userscript.sh
+service userscript /sbin/userscript.sh
 	user root
-	group system
 	critical	
 	oneshot
 
