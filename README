@@ -1,0 +1,33 @@
+HOW TO BUILD eg30Plus KERNEL 2.6.35 FOR SPH-D710
+
+1. How to Build
+	a.Visit http://www.codesourcery.com/, download and install Sourcery G++ Lite 2009q3-68 toolchain for ARM EABI.
+	b.Edit Kernel/arch/arm/configs/eg30Plus_defconfig line 89:
+	CONFIG_INITRAMFS_SOURCE="/home/chris41g/android/touch/initramfs/"
+	with the absolute path to your initramfs
+	b.Edit Kernel/Makefile line 192:
+	CROSS_COMPILE	?= /home/chris41g/arm-2009q3/bin/arm-none-linux-gnueabi-
+	with the absolute path to your Cross Compiler installed above
+	c. Edit ncBuildHelper.sh line 13:
+	CROSS_COMPILE="/home/chris41g/arm-2009q3/bin/arm-none-linux-gnueabi-"
+	with the absolute path to your cross compiler installed above
+	
+	
+	
+2. Output files
+	$ make eg30Plus_defconfig
+	$ make 
+	Kernel : Kernel/arch/arm/boot/zImage
+	
+	$./ncBuildHelper.sh -C -b -t
+	Kernel : Kernel/arch/arm/boot/zImage
+	Tar : eg30Plus-1.0.0.0.tar
+	
+	$./ncBuildHelper.sh -C -b -z
+	Kernel : Kernel/arch/arm/boot/zImage
+	CWM Zip : eg30Plus-1.0.0.0.zip
+	
+3. How to make .tar.md5 binary for downloading into target.
+	- type following commands
+	$ md5sum -t eg30Plus-1.0.0.0.tar >> eg30Plus-1.0.0.0.tar
+	$ mv eg30Plus-1.0.0.0.tar eg30Plus-1.0.0.0.tar.md5
