@@ -20,6 +20,7 @@ on init
     mkdir /tmp
     mkdir /dbdata
     mkdir /persist
+    mkdir /emmc
 
     mkdir /mnt 0775 root root
 
