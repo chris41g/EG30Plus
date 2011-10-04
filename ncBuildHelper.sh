@@ -189,7 +189,8 @@ CREATE_TAR()
 	local T1=$(date +%s)
 	echo "Begin $TARGET-$VERSION.tar.md5 creation..." && echo ""
 	pushd Kernel > /dev/null
-		tar -H ustar -c -C arch/arm/boot zImage >"$OUTFILE_PATH.tar"
+		mv arch/arm/boot/zImage arch/arm/boot/recovery.bin
+		tar -H ustar -c -C arch/arm/boot recovery.bin >"$OUTFILE_PATH.tar"
 	popd > /dev/null
 	local T2=$(date +%s)
 	echo "" && echo "$TARGET-$VERSION.tar creation took $(($T2 - $T1)) seconds."
