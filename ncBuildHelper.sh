@@ -8,7 +8,7 @@
 #
 
 # define envvars
-TARGET="eg30Plus"
+TARGET="eg30PlusExp"
 KBUILD_BUILD_VERSION="EG30Plus_v1.1.0.0"
 CROSS_COMPILE="/home/chris41g/arm-2009q3/bin/arm-none-linux-gnueabi-"
 
