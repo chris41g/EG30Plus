@@ -23,8 +23,6 @@
 #include <linux/miscdevice.h>
 #include <linux/cdev.h>
 #include <linux/netdevice.h>
-#ifdef CONFIG_KERNEL_DEBUG_SEC
-#endif
 #include "dpram_recovery.h"
 #define _DEBUG_
 
@@ -128,18 +126,21 @@ static u32 dpram_recovery_ReadMagicCode_fota(void);
 static void dpram_recovery_WriteMagicCode(u32 dwCode);
 static void dpram_recovery_WriteMagicCode_fota(u32 dwCode);
 static int dpram_recovery_dpram_Init(void);
+static int dpram_recovery_download_Init(void);
 static u16 dpram_recovery_ReadCommand(void);
 static void dpram_recovery_WriteCommand(u16 nCmd);
 static u32 dpram_recovery_check_command(u16 intr, u16 mask);
 static int dpram_recovery_wait_response(u16 cmd_mask);
 static int dpram_recovery_WaitReadyPhase(void);
 static int dpram_recovery_write_modem_firmware(struct dpram_dev *dev, char __user *firmware, int size);
+static int dpram_recovery_write_modem_full_firmware(struct dpram_dev *dev, char __user *firmware, int size);
 static u32 dpram_recovery_WriteImage(u8 * const pBuf, u32 dwWriteLen);
 static u16 dpram_recovery_CalcTotFrame(u32 nDividend, u16 nDivisor);
 static void dpram_recovery_WriteDoneRequest(void);
 static int dpram_recovery_SendDonePhase(void);
 static int dpram_recovery_UpdateRequestPhase(void);
 static u32 dpram_recovery_DownloadControl(u8 *pBufIn, u32 Len);
+static u32 dpram_recovery_DownloadControl_fullfirmware(u8 *pBufIn, u32 Len);
 static u32 dpram_recovery_StatusNotiPhase(u32 *pPercent, u8 *UpDoneNotiFlag);
 static int dpram_recovery_check_status(struct dpram_dev *dev, int __user *pct);
 static int register_interrupt_handler(void);
@@ -150,6 +151,13 @@ typedef struct Up_Noti {
 	u16 error_code;
 	u16 Eop;
 } Status_UpNoti, *pStatus_UpNoti;
+
+typedef struct Up_Notification {
+	u16 Bop;
+	u16 Region;
+	u16 Percent;
+	u16 Eop;
+} Check_UpNoti;
 
 static int
 __inline __writel_once(struct dpram_dev *dev, int addr, int data)
@@ -164,11 +172,11 @@ dpram_recovery_ioremap(struct dpram_dev *dev)
 {
 	int i;
 
-	printk(MSGDBG "%s" MSGEND, __func__);
 	/*Clock Settings for Modem IF ====>FixMe */
 	u32 val;
 	void __iomem *regs = ioremap(0x10030000, 0x10000);
 
+	printk(MSGDBG "%s" MSGEND, __func__);
 	/*Enabling Clock for ModemIF in Reg CLK_GATE_IP_PERIL:0x1003C950 */
 	val = readl(regs + 0xC950);
 	val |= 0x10000000;
@@ -357,6 +365,48 @@ dpram_recovery_dpram_Init(void)
 	return TRUE;
 }
 
+/*  download */
+static int
+dpram_recovery_download_Init(void)
+{
+	const u32 dwMagicCodeToWrite = MAGIC_DMDL;
+	u32 dwMagicCode = 0;
+	int iRetry = 0, nCnt = 0;
+
+	printk(KERN_DEBUG "+DPRAM_Init\n");
+
+	/* Write the magic code */
+	for (iRetry = 1; iRetry > 0 ; iRetry--) {
+		dwMagicCode = dpram_recovery_ReadMagicCode();
+
+		if (dwMagicCode == dwMagicCodeToWrite) {
+			printk(KERN_DEBUG "dwMagicCode == dwMagicCodeToWrite!!\n");
+			break;
+		}
+		dpram_recovery_WriteMagicCode(dwMagicCodeToWrite);
+
+		dwMagicCode = dpram_recovery_ReadMagicCode();
+		printk("\n #### magic code: %x\n", dwMagicCode);
+	}
+
+	dpram_recovery_modem_pwron();
+
+	/* Check phone on status */
+	while (!dpram_recovery_modem_pwr_status()) {
+		msleep(1000);
+		nCnt++;
+		if (nCnt >= 20) {
+			printk(KERN_DEBUG "no phone active!! \n");
+			return FALSE;
+		}
+	}
+	mdelay(1000);
+	printk(KERN_DEBUG "Phone Active!!!\n");
+	printk(KERN_DEBUG "-DPRAM_Init\n");
+	return TRUE;
+}
+
+/* download */
 static u16
 dpram_recovery_ReadCommand(void)
 {
@@ -463,6 +513,22 @@ dpram_recovery_WaitReadyPhase(void)
 }
 
 static int
+dpram_recovery_WaitReadyPhase_download(void)
+{
+	int retval = TRUE;
+
+	/* Send Delta Image Receive Ready Request */
+	printk("Writing command for modem \n");
+	dpram_recovery_WriteCommand(CMD_FOTA_IMG_SEND_REQ);
+
+	/* Wait Delta Image Receive Ready Response */
+	printk("Waiting for the response from Modem \n");
+	retval = dpram_recovery_wait_response(MASK_CMD_FOTA_SEND_DONE_RESP | MASK_CMD_RESULT_SUCCESS);
+
+	return retval;
+}
+
+static int
 dpram_recovery_write_modem_firmware(
 		struct dpram_dev *dev, char __user *firmware, int size)
 {
@@ -488,6 +554,66 @@ dpram_recovery_write_modem_firmware(
 		printk(KERN_DEBUG "[DPRAM_DownloadControl] Wait FOTA Update Start Response Failed!!\n");
 		ret = -7; /* -7 means that FOTA Update Start Response failed. */
 		goto Exit;
+	}
+
+	ret = TRUE;
+
+Exit:
+	return ret;
+}
+
+static int
+dpram_recovery_write_modem_full_firmware(struct dpram_dev *dev, char __user *firmware, int size)
+{
+	int ret = FALSE;
+	u32 curr_region = 0, curr_percent = 0;
+
+	/* Start Wait Ready Phase */
+	if (dpram_recovery_wait_response(MASK_CMD_FOTA_IMG_RECEIVE_READY_RESP) == FALSE) {
+		printk(" error[-2] in return %s \n", __func__);
+		ret = -2;
+		goto Exit;
+	}
+
+	/* Clear Response */
+	dpram_recovery_clear_modem_command();
+
+	/* Downlaod start Req ~ Update Status Noti */
+	ret = dpram_recovery_DownloadControl_fullfirmware((u8 *)firmware, size);
+	if (ret < 0) {
+		printk(KERN_DEBUG "[DPRAM_Download]Failed in DownloadControl\n.");
+		goto Exit;
+	}
+	printk(KERN_DEBUG "[DPRAM_Download]FileSize : %d\n", size);
+	printk(KERN_DEBUG "[DPRAM_Download]Bootloader Image Download Completed!\n");
+
+	/* Update Request Phase */
+	while (1) {
+		Check_UpNoti upstatus;
+		ret = dpram_recovery_wait_response(MASK_CMD_UPDATE_DONE_NOTIFICATION);
+		if (ret == TRUE) {
+			printk(KERN_DEBUG " Successfully Received UPDATE DONE Command in %s", __func__);
+			dpram_recovery_clear_modem_command();
+			break ;
+		}
+		ret = dpram_recovery_wait_response(MASK_CMD_STATUS_UPDATE_NOTIFICATION);
+		if (ret == FALSE) {
+			printk(KERN_DEBUG " Not Received UPDATE Status Notification Command in %s", __func__);
+			dpram_recovery_clear_modem_command();
+			break ;
+		}
+		dpram_recovery_clear_modem_command();
+		memcpy((void *)&upstatus, (void *)(dpram->dpram_vbase + DPRAM_PDA2PHONE_FORMATTED_START_ADDRESS), 8);
+		if ((upstatus.Bop != START_INDEX) || (upstatus.Eop != END_INDEX)) {
+			printk(KERN_DEBUG "CP Update Failed by Bad Header!! \n");
+			printk(KERN_DEBUG "0x%x  0x%x \n", upstatus.Bop, upstatus.Eop);
+			ret = FALSE;
+			goto Exit;
+		} else {
+			curr_region = upstatus.Region;
+			curr_percent = upstatus.Percent;
+			printk(KERN_DEBUG "Region= 0x%x Percent = 0x%x \n", upstatus.Region, upstatus.Percent);
+		}
 	}
 
 	ret = TRUE;
@@ -523,7 +649,7 @@ dpram_recovery_WriteImage(u8 *const pBuf, u32 dwWriteLen)
 	/*printk(KERN_DEBUG "Start %d 0x%04x(%d)\n", dwWriteLen, g_TotFrame, g_TotFrame);*/
 
 	pDest = (u8 *)(dpram->dpram_vbase + DPRAM_PDA2PHONE_FORMATTED_START_ADDRESS);
-	Len   = (u16)min(dwWriteLen, FODN_DEFAULT_WRITE_LEN);
+	Len   = (u16)min((u32)dwWriteLen, (u32)FODN_DEFAULT_WRITE_LEN);
 
 	/*printk(KERN_DEBUG "Start : pDest(0x%08x),  dwWriteLen(%d)\n",pDest, Len);*/
 
@@ -579,6 +705,75 @@ dpram_recovery_WriteImage(u8 *const pBuf, u32 dwWriteLen)
 
 	return Len;
 }
+
+static u32
+dpram_recovery_WriteImage_download(u8 *const pBuf, u32 dwWriteLen)
+{
+	u8 *pDest;
+	u8 *pDest_Data;
+	u16 Len;
+	u16 nCrc;
+
+	/*printk(KERN_DEBUG "Start %d 0x%04x(%d)\n", dwWriteLen, g_TotFrame, g_TotFrame);*/
+
+	pDest = (u8 *)(dpram->dpram_vbase + DPRAM_PDA2PHONE_FORMATTED_START_ADDRESS);
+	Len   = (u16)min((u32)dwWriteLen, (u32)FODN_DEFAULT_WRITE_LEN);
+
+	/*printk(KERN_DEBUG "Start : pDest(0x%08x),  dwWriteLen(%d)\n",pDest, Len);*/
+
+	/* Start Index */
+	*pDest++ = LOBYTE(START_INDEX);
+	*pDest++ = HIBYTE(START_INDEX);
+
+	/*Total Frame number: */
+	*pDest++ = LOBYTE(g_TotFrame);
+	*pDest++ = HIBYTE(g_TotFrame);
+
+	/*Current Frame number; */
+	*pDest++ = LOBYTE(g_CurFrame);
+	*pDest++ = HIBYTE(g_CurFrame);
+	g_CurFrame++;
+
+	/* Length - Does it include the length of START_INDEX?? */
+	*pDest++ = LOBYTE(Len);
+	*pDest++ = HIBYTE(Len);
+
+	/* Data */
+	pDest_Data = pDest;
+	memcpy((void *)pDest, (void *)pBuf, Len);
+	pDest += Len;
+
+	/* Fill null if data length is odd */
+	if (Len%2 != 0) {
+		*pDest++ = 0xff;
+		printk(KERN_DEBUG "odd  0x%08x  0x%02x\n", (unsigned int)(pDest-1), (u8)(*pDest-1));
+	}
+
+	/*printk(KERN_DEBUG "len:%d default len:%d\n", Len, FODN_DEFAULT_WRITE_LEN);*/
+	/*printk(KERN_DEBUG "start data 0x%08x \n", pDest);*/
+
+	if (Len < FODN_DEFAULT_WRITE_LEN) {
+		memset((void *)pDest, 0x0 /*0xff*/, FODN_DEFAULT_WRITE_LEN - Len);
+		pDest += (FODN_DEFAULT_WRITE_LEN - Len) ;
+	}
+	printk(KERN_DEBUG "CRC start 0x%08x\n", (unsigned int)pDest);
+
+	nCrc = dpram_recovery_MakeCRC(Len, (u16 *)pDest_Data);
+
+	*pDest++ = LOBYTE(nCrc);
+	*pDest++ = HIBYTE(nCrc);
+
+	printk(KERN_DEBUG "CRC value 0x%04x \n", nCrc);
+
+	*pDest++ = LOBYTE(END_INDEX);
+	*pDest++ = HIBYTE(END_INDEX);
+
+	/* Write Command*/
+	dpram_recovery_WriteCommand(CMD_FOTA_UPDATE_START_REQ);
+
+	return Len;
+}
+
 
 static u16
 dpram_recovery_CalcTotFrame(u32 nDividend, u16 nDivisor)
@@ -658,7 +853,7 @@ dpram_recovery_DownloadControl(u8 *pBufIn, u32 Len)
 		/*Write proper size of image to DPRAM*/
 		printk(KERN_DEBUG "[DPRAM_DownloadControl]DPRAM_WriteImage %d/%d start\n",
 				g_CurFrame, g_TotFrame);
-		dwWriteLen = min(Len - dwTotWrittenLen, DELTA_PACKET_SIZE);
+		dwWriteLen = min((u32)(Len - dwTotWrittenLen), (u32)DELTA_PACKET_SIZE);
 		dwWrittenLen = dpram_recovery_WriteImage(pBufIn, dwWriteLen);
 		printk(KERN_DEBUG "[DPRAM_DownloadControl]Written data:%d\n", dwWrittenLen);
 
@@ -714,6 +909,100 @@ dpram_recovery_DownloadControl(u8 *pBufIn, u32 Len)
 		dwRet = -6; /* -6 means that SendDone Phase failed. */
 		goto Exit;
 	}
+
+Exit:
+	return dwRet;
+}
+
+static u32
+dpram_recovery_DownloadControl_fullfirmware(u8 *pBufIn, u32 Len)
+{
+	u32 dwWriteLen = 0, dwWrittenLen = 0, dwTotWrittenLen = 0;
+	u32 dwRet = 0;
+	u16 nTotalFrame = 0, nIntrValue = 0;
+	int nwRetry = 0, nrRetry = 0, retval;
+
+	/* Send command and wait for response */
+	if (dpram_recovery_WaitReadyPhase_download() == FALSE) {
+		printk(" error[-2] in return %s \n", __func__);
+		dwRet = -2;
+		goto Exit;
+	}
+
+	nTotalFrame = dpram_recovery_CalcTotFrame(Len, DELTA_PACKET_SIZE);
+	g_TotFrame =  nTotalFrame;
+	printk(KERN_DEBUG "[DPRAM_DownloadControl] total frame:%d,%d\n", g_TotFrame, nTotalFrame);
+
+	while (dwTotWrittenLen < Len) {
+		/*Write proper size of image to DPRAM*/
+		printk(KERN_DEBUG "[DPRAM_DownloadControl]DPRAM_WriteImage %d/%d start\n",
+				g_CurFrame, g_TotFrame);
+		dwWriteLen = min((u32)(Len - dwTotWrittenLen), (u32)DELTA_PACKET_SIZE);
+		dwWrittenLen = dpram_recovery_WriteImage_download(pBufIn, dwWriteLen);
+		printk(KERN_DEBUG "[DPRAM_DownloadControl]Written data:%d\n", dwWrittenLen);
+
+		if (dwWrittenLen > 0) {
+			dwTotWrittenLen += dwWrittenLen;
+			pBufIn += dwWrittenLen;
+		} else {
+			printk(KERN_DEBUG "[DPRAM_DownloadControl]Write Image Len is wierd.\n");
+			if (nwRetry < 3) {
+				nwRetry++;
+				printk(KERN_DEBUG "[DPRAM_DownloadControl]Retry to write. nRetry = %8x\n", nwRetry);
+				continue;
+			} else {
+				printk(KERN_DEBUG "[DPRAM_DownloadControl]Fail to Write Image to DPRAM.\n");
+				dwRet = -3;
+				goto Exit;
+			}
+		}
+
+		/* Wait for the IMAGE WRITE RESPONSE */
+		while (nrRetry < 10) {
+			retval = dpram_recovery_wait_response(MASK_CMD_IMAGE_SEND_RESPONSE);
+			if (retval == FALSE) {
+				printk(KERN_DEBUG "[DPRAM_DownloadControl] Wait Image Send Response Failed\n");
+				dwRet = -4;
+				goto Exit;
+			} else {
+				nIntrValue = dpram_recovery_ReadCommand();
+				if ((nIntrValue & MASK_CMD_RESULT_FAIL) == 0) {
+					printk(KERN_DEBUG "[DPRAM_DownloadControl] MASK_CMD_IMAGE_SEND_RESPONSE OK issued.\n");
+					printk(KERN_DEBUG "[DPRAM_DownloadControl] %d /%d ok\n", g_CurFrame - 1, g_TotFrame);
+					break;
+				} else {
+					printk(KERN_DEBUG "[DPRAM_DownloadControl] MASK_CMD_IMAGE_SEND_RESPONSE Failed issued.\n");
+					msleep(100);
+					nrRetry++;
+					dpram_recovery_WriteCommand(CMD_FOTA_UPDATE_START_REQ);
+					printk(KERN_DEBUG "[DPRAM_DownloadControl] CMD_IMG_SEND_REQ retry.(%d)\n", nrRetry);
+
+					if (nrRetry >= 10) {
+						dwRet = -5;
+						goto Exit;
+					}
+				}
+			}
+		}
+	}
+
+	g_CurFrame = 1;
+
+	/* SendDone Phase */
+	dpram_recovery_WriteCommand(CMD_DL_SEND_DONE_REQ);
+	printk(KERN_DEBUG "[DPRAM_WriteDoneRequest] End\n");
+
+	/* Wait Write Done Response */
+	dwRet = dpram_recovery_wait_response(MASK_CMD_SEND_DONE_RESPONSE);
+	if (dwRet == FALSE) {
+		printk(KERN_DEBUG " Wait Write Done Response Failed in SendDone Phase!!\n");
+		dwRet = -6;
+		goto Exit;
+	}
+
+	printk(KERN_DEBUG "Wait 0.5 secs.. .. ..\n");
+	msleep(500);
+
 
 Exit:
 	return dwRet;
@@ -888,6 +1177,34 @@ dpram_recovery_ioctl(struct inode *inode, struct file *filp,
 
 			dpram_recovery_modem_pwroff();
 			break;
+
+		case IOCTL_ST_FW_DOWNLOAD:
+			printk(KERN_ERR "%s IOCTL DOWNLOAD FIRMWARE \n", __func__);
+			/* Dpram Phone off */
+			dpram_recovery_modem_pwroff();
+
+			/* Enter Download Mode */
+			dpram_recovery_download_Init();
+
+			if (arg == 0) {
+				printk(MSGWARN "Firmware should be written prior to this call" MSGEND);
+			} else {
+				struct dpram_firmware fw;
+
+				ret_check = copy_from_user((void *)&fw, (void *)arg, sizeof(fw));
+
+				if (ret_check) {
+					printk("[IOCTL_ST_FW_UPDATE]copy from user failed!");
+					return -EFAULT;
+				}
+
+				ret = dpram_recovery_write_modem_full_firmware(dev, fw.firmware, fw.size);
+
+				if (ret < 0) {
+					printk("firmware write failed\n");
+				}
+			}
+
 
 		default:
 			printk(KERN_ERR "Unknown command");
