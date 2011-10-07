@@ -1227,9 +1227,8 @@ static int s5pv310_target(struct cpufreq_policy *policy,
 	if (s5pv310_max_armclk == ARMCLOCK_1200MHZ) {
 #ifdef CONFIG_FREQ_STEP_UP_L2_L0
 		/* change L2 -> L0 */
-		if ((index == L0) && (old_index > L2)) {
+		if ((index == L0) && (old_index > L2))
 			index = L2;
-		}
 #else
 		/* change L2 -> L1 and change L1 -> L0 */
 		if (index == L0) {
@@ -2201,11 +2200,10 @@ static int s5pv310_asv_table_update(void)
 	printk(KERN_INFO "ASV ids_group = %d hpm_group = %d asv_group = %d\n",
 		ids_group, hpm_group, asv_group);
 
-	if (s5pv310_max_armclk == ARMCLOCK_1200MHZ) {
+	if (s5pv310_max_armclk == ARMCLOCK_1200MHZ)
 		last_level = CPUFREQ_LEVEL_END - 1;
-	} else {
+	else
 		last_level = CPUFREQ_LEVEL_END - 2;
-	}
 
 	/* VDD_ARM level except the last level  */
 	for (i = 0; i < last_level; i++) {
@@ -2341,6 +2339,7 @@ static void s5pv310_asv_set_voltage(void)
 	switch (freqs.old) {
 	case 1200000:
 		asv_arm_index = 0;
+		break;
 	case 1000000:
 		asv_arm_index = 1;
 		break;

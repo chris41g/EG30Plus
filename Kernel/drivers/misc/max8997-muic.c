@@ -466,7 +466,7 @@ static ssize_t esn_store (struct device *dev,
 	size = sscanf(buf, "%d\n", &is_default_esn);
 	if (is_default_esn == 1) {
 		schedule_delayed_work(&info->init_work, msecs_to_jiffies(1));
-		printk("[%s] CDMA I/F Cable is detected\n",__func__);
+		pr_info("[%s] CDMA I/F Cable is detected\n", __func__);
 	}
 
 	return size;
@@ -901,14 +901,47 @@ static int max8997_muic_handle_attach(struct max8997_muic_info *info,
 		}
 	}
 
+	if (info->cable_type == CABLE_TYPE_DESKDOCK && adc != ADC_DESKDOCK) {
+		dev_warn(info->dev, "%s: assume deskdock detach\n", __func__);
+		info->cable_type = CABLE_TYPE_NONE;
+
+		max8997_muic_set_charging_type(info, false);
+
+		if (mdata->deskdock_cb)
+			mdata->deskdock_cb(MAX8997_MUIC_DETACHED);
+	} else if (info->cable_type == CABLE_TYPE_CARDOCK
+					&& adc != ADC_CARDOCK) {
+		dev_warn(info->dev, "%s: assume cardock detach\n", __func__);
+		info->cable_type = CABLE_TYPE_NONE;
+
+		max8997_muic_set_charging_type(info, false);
+
+		if (mdata->cardock_cb)
+			mdata->cardock_cb(MAX8997_MUIC_DETACHED);
+	}
+
 	/* 1Kohm ID regiter detection (mHL)
 	 * Old MUIC : ADC value:0x00 or 0x01, ADCLow:1
 	 * New MUIC : ADC value is not set(Open), ADCLow:1, ADCError:1
 	 */
+
+#if defined(CONFIG_TARGET_LOCALE_NAATT)
+	if (adclow && adcerr) {
+		if (info->cable_type == CABLE_TYPE_JIG_UART_OFF) {
+			dev_info(info->dev, "%s: current state is jig_uart_off,"
+					"just ignore\n", __func__);
+			return 0;
+		} else {
+			max8997_muic_attach_mhl(info, chgtyp);
+			return 0;
+		}
+	}
+#else
 	if (adclow && adcerr) {
 		max8997_muic_attach_mhl(info, chgtyp);
 		return 0;
 	}
+#endif
 
 	switch (adc) {
 	case ADC_GND:
@@ -953,7 +986,7 @@ static int max8997_muic_handle_attach(struct max8997_muic_info *info,
 	case ADC_CARDOCK:
 		#if defined (CONFIG_TARGET_LOCALE_NA)
 		if (is_default_esn == 1) {
-			printk("SWITCHING TO CDMA I/F CABLE Mode \n ");
+			pr_info("SWITCHING TO CDMA I/F CABLE Mode\n");
 			max8997_muic_handle_jig_uart(info, vbvolt);
 		}
 		else
@@ -1164,6 +1197,9 @@ static void max8997_muic_detect_dev(struct max8997_muic_info *info)
 	u8 adc, chgtyp, adcerr;
 	int intr = INT_ATTACH;
 	int ret;
+#if defined(CONFIG_TARGET_LOCALE_NAATT)
+	struct max8997_muic_data *mdata = info->muic_data;
+#endif
 
 	ret = max8997_bulk_read(client, MAX8997_MUIC_REG_STATUS1, 2, status);
 	if (ret) {

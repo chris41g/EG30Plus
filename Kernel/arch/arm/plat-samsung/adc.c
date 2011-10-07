@@ -53,6 +53,7 @@ struct s3c_adc_client {
 			      unsigned val1, unsigned val2,
 			      unsigned *samples_left);
 	atomic_t		running;
+	int			error_count;
 };
 
 struct adc_device {
@@ -161,10 +162,7 @@ int s3c_adc_start(struct s3c_adc_client *client,
 	struct adc_device *adc = adc_dev;
 	unsigned long flags;
 
-	if (!adc) {
-		printk(KERN_ERR "%s: failed to find adc\n", __func__);
-		return -EINVAL;
-	}
+	BUG_ON(!adc);
 
 	if (client->is_ts && adc->ts_pend)
 		return -EAGAIN;
@@ -208,13 +206,16 @@ int s3c_adc_read(struct s3c_adc_client *client, unsigned int ch)
 	if (ret < 0)
 		goto err;
 
-	ret = wait_event_timeout(wake, client->result >= 0, HZ / 2);
+	ret = wait_event_timeout(wake, client->result >= 0, HZ);
 	if (client->result < 0) {
 		s3c_adc_stop(client);
-		WARN(1, "%s: %p is timed out\n", __func__, client);
+		WARN(1, "%s: %p is timed out at ch %d\n", __func__, client, ch);
+		++client->error_count;
+		BUG_ON(client->error_count > 10);
 		ret = -ETIMEDOUT;
 		goto err;
-	}
+	} else
+		client->error_count = 0;
 
 	client->convert_cb = NULL;
 	return client->result;

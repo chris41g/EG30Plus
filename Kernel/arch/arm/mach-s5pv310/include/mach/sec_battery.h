@@ -21,6 +21,8 @@
 #define HWREV_FOR_BATTERY	0x0C
 #elif defined(CONFIG_MACH_C1_NA_SPR_EPIC2_REV00)
 #define HWREV_FOR_BATTERY	0xFC
+#elif defined(CONFIG_MACH_Q1_REV02)
+#define HWREV_FOR_BATTERY	0x02
 #else	/*U1 EUR OPEN */
 #define HWREV_FOR_BATTERY	0x08
 #endif
