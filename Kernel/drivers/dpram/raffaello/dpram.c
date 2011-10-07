@@ -33,6 +33,9 @@
 #include <linux/wakelock.h>
 #include <linux/miscdevice.h>
 #include <linux/netdevice.h>
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+#include <linux/kernel_sec_common.h>
+#endif
 //#include <mach/ds_manager.h>
 
 #include "dpram.h"
@@ -98,8 +101,6 @@ int cp_dump_irq; //for LPA
 #define MASK_PHONE_CMD			0x2000
 
 #define RAMDUMP_WAIT_TIMEOUT    5*HZ
-
-#define UPLOAD_CAUSE_CDMA_RESET 0x000000F3
 
 typedef struct _DumpCMDHeader
 {
@@ -304,7 +305,6 @@ static struct fasync_struct *dpram_dump_async_q;
 
 extern void usb_switch_mode(int);
 extern int sec_debug_level();
-extern int sec_debug_set_debug_level(int l);
 #endif    /* _ENABLE_ERROR_DEVICE */
 
 
@@ -1111,7 +1111,7 @@ static int dpram_read_raw(dpram_device_t *device, const u16 non_cmd)
 		    dev->vs_dev.tty->low_latency = 0;
                     tty_flip_buffer_push(dev->vs_dev.tty);
 #ifdef PRINT_DPRAM_READ
-                    LOGE("RAW pre_data_size: %d, len-pre_data_size: %d, ret: %d\n", pre_data_size, len- pre_data_size, ret);
+					LOGE("RAW pre_data_size: %d, len-pre_data_size: %d, ret: %d\n", pre_data_size, len- pre_data_size, ret);
 #endif
                 }
             }
@@ -1475,6 +1475,9 @@ static void dpram_phone_reset(void)
 {
     PRINT_FUNC();
 
+	if(g_dpram_wpend == IDPRAM_WPEND_LOCK)
+		g_dpram_wpend = IDPRAM_WPEND_UNLOCK; // dpram write unlock	
+
 	/*Add for Gadui : Normal boot Magic - 0x54424D4E*/
     dpram_init_magic_num();
 
@@ -1785,32 +1788,37 @@ static int dpram_tty_ioctl(struct tty_struct *tty, struct file *file, unsigned i
 
         case DPRAM_PHONE_UNSET_UPLOAD:
             LOGA("IOCTL cmd = DPRAM_PHONE_UNSET_UPLOAD\n");
-            /* sec_debug_clear_upload_magic_number(); */
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+            kernel_sec_clear_upload_magic_number();
+#endif
             break;
 
         case DPRAM_PHONE_SET_AUTOTEST:
             LOGA("IOCTL cmd = DPRAM_PHONE_SET_AUTOTEST\n");
-            /* sec_debug_set_autotest(); */
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+            kernel_sec_set_autotest();
+#endif
             break;
 
         case DPRAM_PHONE_GET_DEBUGLEVEL:
             LOGA("IOCTL cmd = DPRAM_PHONE_GET_DEBUGLEVEL\n");
-#ifdef CONFIG_SEC_DEBUG
-            switch(sec_debug_level()) {
-	    case 0: /* KERNEL_SEC_DEBUG_LEVEL_LOW */
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+            switch(kernel_sec_get_debug_level())
+            {
+                case KERNEL_SEC_DEBUG_LEVEL_LOW:
                     val = 0xA0A0;
                     break;
-	    case 1: /* KERNEL_SEC_DEBUG_LEVEL_MID */
+                case KERNEL_SEC_DEBUG_LEVEL_MID:
                     val = 0xB0B0;
                     break;
-	    case 3: /* KERNEL_SEC_DEBUG_LEVEL_HIGH */
+                case KERNEL_SEC_DEBUG_LEVEL_HIGH:
                     val = 0xC0C0;
                     break;
-	    default:
+                default:
                     val = 0xFFFF;
                     break;
             }
-            LOGA("DPRAM_PHONE_GET_DEBUGLEVEL = %x, %d\n", sec_debug_level(), val);
+            LOGA("DPRAM_PHONE_GET_DEBUGLEVEL = %x, %d\n", kernel_sec_get_debug_level(), val);
 #endif
             return copy_to_user((unsigned int *)arg, &val, sizeof(val));
 
@@ -1818,18 +1826,19 @@ static int dpram_tty_ioctl(struct tty_struct *tty, struct file *file, unsigned i
 
         case DPRAM_PHONE_SET_DEBUGLEVEL:
             LOGA("IOCTL cmd = DPRAM_PHONE_SET_DEBUGLEVEL\n");
-#ifdef CONFIG_SEC_DEBUG
-            switch(sec_debug_level()) {
-	    case 0: /* KERNEL_SEC_DEBUG_LEVEL_LOW */
-                    sec_debug_set_debug_level(1); /* to mid */
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+            switch(kernel_sec_get_debug_level())
+            {
+                case KERNEL_SEC_DEBUG_LEVEL_LOW:
+                    kernel_sec_set_debug_level(KERNEL_SEC_DEBUG_LEVEL_MID);
                     break;
-	    case 1: /* KERNEL_SEC_DEBUG_LEVEL_MID */
-                    sec_debug_set_debug_level(3); /* to high */
+                case KERNEL_SEC_DEBUG_LEVEL_MID:
+                    kernel_sec_set_debug_level(KERNEL_SEC_DEBUG_LEVEL_HIGH);
                     break;
-	    case 3: /* KERNEL_SEC_DEBUG_LEVEL_HIGH */
-                    sec_debug_set_debug_level(0); /* to low */
+                case KERNEL_SEC_DEBUG_LEVEL_HIGH:
+                    kernel_sec_set_debug_level(KERNEL_SEC_DEBUG_LEVEL_LOW);
                     break;
-	    default:
+                default:
                     break;
             }
 #endif
@@ -1880,10 +1889,10 @@ static int dpram_tty_ioctl(struct tty_struct *tty, struct file *file, unsigned i
 		dpram_clear_response();
 
             // goto Upload mode
-		if (!sec_debug_level()) { /* not if debug level low */
-			LOGE("Upload Mode!!!\n");
-			kernel_sec_dump_cp_handle2();
-		}
+            if (kernel_sec_get_debug_level() != KERNEL_SEC_DEBUG_LEVEL_LOW) {
+                LOGE("Upload Mode!!!\n");
+                kernel_sec_dump_cp_handle2();
+            }
 
             return 0;
         }
@@ -2037,7 +2046,7 @@ static int dpram_dump_ioctl(struct inode *inode, struct file *filp,
             close_cp_ramdump();
 
             // Go to Upload mode
-            if (!sec_debug_level()) /* not if debug level low */
+            if (kernel_sec_get_debug_level() != KERNEL_SEC_DEBUG_LEVEL_LOW)
                 kernel_sec_dump_cp_handle2();
 
             return 0;
@@ -2147,58 +2156,58 @@ static void cmd_req_active_handler(void)
 static void cmd_error_display_handler(void)
 {
 #ifdef _ENABLE_ERROR_DEVICE
-	unsigned short intr;
-	unsigned long flags;
-	char buf[DPRAM_ERR_MSG_LEN];
+    unsigned short intr;
+    unsigned long  flags;
+    char buf[DPRAM_ERR_MSG_LEN];
 
-	memset((void *)buf, 0, sizeof(buf));
+    memset((void *)buf, 0, sizeof (buf));
 
-#ifdef CONFIG_SEC_DEBUG
-	if (dpram_err_cause == UPLOAD_CAUSE_CDMA_RESET) {
-		if (sec_debug_level())
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+    if (dpram_err_cause == UPLOAD_CAUSE_CDMA_RESET)
+    {
+		if(sec_debug_level())
 			memcpy((void *)buf, "UPLOAD", sizeof("UPLOAD"));
-		else		//debug level is low
-			memcpy((void *)buf, "9 $PHONE-RESET",
-			       sizeof("9 $PHONE-RESET"));
-	} else {
-		if (sec_debug_level()) {
+		else //debug level is low
+			memcpy((void *)buf, "9 $PHONE-RESET", sizeof("9 $PHONE-RESET"));
+    }
+    else
+    {
+		if(sec_debug_level()) {
 			buf[0] = 'C';
 			buf[1] = 'D';
 			buf[2] = 'M';
 			buf[3] = 'A';
 			buf[4] = ' ';
-			READ_FROM_DPRAM((buf + 5),
-					DPRAM_PHONE2PDA_FORMATTED_BUFFER_ADDRESS,
-					(sizeof(buf) - 6));
-		} else		//debug level is low
-			memcpy((void *)buf, "9 $PHONE-RESET",
-			       sizeof("9 $PHONE-RESET"));
-	}
+			READ_FROM_DPRAM((buf + 5), DPRAM_PHONE2PDA_FORMATTED_BUFFER_ADDRESS, (sizeof(buf) - 6));
+		} else //debug level is low
+			memcpy((void *)buf, "9 $PHONE-RESET", sizeof("9 $PHONE-RESET"));
+    }
 
-	LOGE("[PHONE ERROR] ->> %s\n", buf);
+    LOGE("[PHONE ERROR] ->> %s\n", buf);
 
-	memcpy(dpram_err_buf, buf, DPRAM_ERR_MSG_LEN);
-	dpram_err_len = 64;
+    memcpy(dpram_err_buf, buf, DPRAM_ERR_MSG_LEN);
+    dpram_err_len = 64;
 
-	/* goto Upload mode : receive C9 */
-	if ((sec_debug_level()) && (dpram_err_cause != UPLOAD_CAUSE_CDMA_RESET)) {
-		local_irq_save(flags);
-		LOGE("Upload Mode!!!\n");
-		intr = ioread16((void *)dpram_mbx_AB);
-		if (intr ==
-		    (MBX_CMD_CDMA_DEAD | INT_MASK_VALID | INT_MASK_COMMAND)) {
-			LOGE("mbx_AB = 0x%04X\n", intr);
-		}
+    /* goto Upload mode : receive C9 */
+    if ((sec_debug_level())&&(dpram_err_cause != UPLOAD_CAUSE_CDMA_RESET))
+    {
+	local_irq_save(flags);
+        LOGE("Upload Mode!!!\n");
+        intr = ioread16((void *)dpram_mbx_AB);
+        if (intr == (MBX_CMD_CDMA_DEAD|INT_MASK_VALID|INT_MASK_COMMAND))
+        {
+            LOGE("mbx_AB = 0x%04X\n", intr);
+        }
 
-		kernel_sec_dump_cp_handle2();
+        kernel_sec_dump_cp_handle2();
 		local_irq_restore(flags);
-	}
+    }
 
 	dpram_err_cause = 0;
-	wake_up_interruptible(&dpram_err_wait_q);
-	kill_fasync(&dpram_err_async_q, SIGIO, POLL_IN);
+    wake_up_interruptible(&dpram_err_wait_q);
+    kill_fasync(&dpram_err_async_q, SIGIO, POLL_IN);
 #endif
-#endif				/* _ENABLE_ERROR_DEVICE */
+#endif    /* _ENABLE_ERROR_DEVICE */
 }
 
 
@@ -2384,7 +2393,7 @@ static void phone_active_work_func(struct work_struct *work)
 #endif
 		memcpy_fromio(&reset_code, (void *)DPRAM_VBASE, sizeof(reset_code));
 		if (reset_code != CP_RESET_CODE) {
-#ifdef CONFIG_SEC_DEBUG
+#ifdef CONFIG_KERNEL_DEBUG_SEC
 			dpram_err_cause = UPLOAD_CAUSE_CDMA_RESET;
 #endif
 			if (g_phone_power_off_sequence != 1)
@@ -2494,27 +2503,25 @@ static irqreturn_t cp_dump_irq_handler(int irq, void *dev_id)
 
 static int kernel_sec_dump_cp_handle2(void)
 {
-#ifdef CONFIG_SEC_DEBUG
-	LOGA("Configure to restart AP and collect dump on restart...\n");
+#ifdef CONFIG_KERNEL_DEBUG_SEC
+    LOGA("Configure to restart AP and collect dump on restart...\n");
 
-	// output high
+    // output high
 	gpio_set_value(S5PV310_GPE0_3_MDM_IRQn, GPIO_LEVEL_HIGH);
 
-	// GPIO output mux
+    // GPIO output mux
 	s3c_gpio_cfgpin(S5PV310_GPE0_0_MDM_WEn, S3C_GPIO_SFN(S5PV310_MDM_IF_SEL));
 	s3c_gpio_cfgpin(S5PV310_GPE0_1_MDM_CSn, S3C_GPIO_SFN(S5PV310_MDM_IF_SEL));
 	s3c_gpio_cfgpin(S5PV310_GPE0_2_MDM_Rn, S3C_GPIO_SFN(S5PV310_MDM_IF_SEL));
 	s3c_gpio_cfgpin(S5PV310_GPE0_3_MDM_IRQn, S3C_GPIO_SFN(S5PV310_MDM_IF_SEL));
 	s3c_gpio_cfgpin(S5PV310_GPE0_4_MDM_ADVN, S3C_GPIO_SFN(S5PV310_MDM_IF_SEL));
 
-	if (dpram_err_len) {
-		char buf[DPRAM_ERR_MSG_LEN + 64] = "CP Crash:";
-		strncat(buf, dpram_err_buf, dpram_err_len);
-		panic(buf);
-	} else
-		panic("CP Crash");
+    if (dpram_err_len)
+        kernel_sec_set_cause_strptr(dpram_err_buf, dpram_err_len);
+
+    panic("CP Crash");
 #endif
-	return 0;
+    return 0;
 }
 
 /* basic functions. */
@@ -3466,6 +3473,7 @@ static int dpram_suspend(struct platform_device *dev, pm_message_t state)
         if (in_intr != (INT_MASK_VALID|INT_MASK_COMMAND|MBX_CMD_DPRAM_DOWN))
         {
             LOGE("T-I-M-E-O-U-T !!! (intr = 0x%04X)\n", in_intr);
+            g_dpram_wpend = IDPRAM_WPEND_UNLOCK; // dpram write unlock
             return -1;
         }
 
@@ -3493,6 +3501,7 @@ static int dpram_suspend(struct platform_device *dev, pm_message_t state)
     {
         //wake_lock_timeout(&dpram_wake_lock, HZ/4);
         LOGA("Skip the suspned mode - read lock \n");
+	g_dpram_wpend = IDPRAM_WPEND_UNLOCK; // dpram write unlock
         return -1;
     }
 
