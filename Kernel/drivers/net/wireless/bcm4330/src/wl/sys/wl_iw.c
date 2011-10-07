@@ -6914,11 +6914,11 @@ static int get_softap_auto_channel(struct net_device *dev, struct ap_profile *ap
 			}
 
 	get_channel_retry:
-		bcm_mdelay(350);
+		bcm_mdelay(400);
 
 		ret = dev_wlc_ioctl(dev, WLC_GET_CHANNEL_SEL, &chosen, sizeof(chosen));
 		if (ret < 0 || dtoh32(chosen) == 0) {
-			if (retry++ < 15) {
+			if (retry++ < 10) {
 				WL_ERROR(("%d tried by inyung, ret=%d, chosen=%d\n", retry, ret, chosen));
 					goto get_channel_retry;
 			} else {
@@ -7703,6 +7703,13 @@ iwpriv_fw_reload(struct net_device *dev,
 			WL_ERROR(("Error: extracting FW_PATH='' string\n"));
 			goto exit_proc;
 		}
+
+#if (defined(CONFIG_MACH_SAMSUNG_P3) && defined(CHECK_CHIP_REV)) || defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_N1)
+		if (g_chipver == 4) {
+		   WL_SOFTAP(("---------------- CHIP bcm4330_B2 for SoftAP --------------------- \r\n"));
+		   strcat(fwstr, "_b2");
+		}
+#endif
 
 		if  (strstr(fwstr, "aps") != NULL) {
 			  WL_SOFTAP(("GOT APSTA FIRMWARE\n"));

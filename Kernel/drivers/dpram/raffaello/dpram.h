@@ -18,7 +18,7 @@
 /*
 ** FEATURE DEFINITIONs
 */
-#define _DEBUG
+//#define _DEBUG
 
 #define CDMA_IPC_C210_IDPRAM
 #define DPRAM_SIZE_16KB
@@ -316,10 +316,10 @@ struct pdp_info {
 /*
 ** DEBUG FEATUREs
 */
-#ifdef _DEBUG
-#define _DEBUG_LOG
-#define _ENABLE_ERROR_DEVICE
-#endif
+//#ifdef _DEBUG
+//#define _DEBUG_LOG
+//#define _ENABLE_ERROR_DEVICE
+//#endif
 
 #define DL_IPC      0x01<<10
 #define DL_WARN     0x01<<15

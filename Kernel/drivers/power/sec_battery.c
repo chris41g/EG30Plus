@@ -29,7 +29,7 @@
 #include <plat/adc.h>
 #include <mach/sec_battery.h>
 
-#ifdef CONFIG_TARGET_LOCALE_NA
+#if defined(CONFIG_TARGET_LOCALE_NA) || defined(CONFIG_TARGET_LOCALE_NAATT)
 #define POLLING_INTERVAL	(10 * 1000)
 #else
 #define POLLING_INTERVAL	(40 * 1000)
@@ -39,11 +39,16 @@
 #if defined(CONFIG_TARGET_LOCALE_NAATT)
 #define VF_CHECK_INTERVAL	(5 * 1000)
 
-#define	MAX_VF	1500
-#define	MIN_VF	1350
+#define	MAX_VF	1800
+#define	MIN_VF	1100
 #define	VF_COUNT	1
 #else
 #define VF_CHECK_INTERVAL	(10 * 1000)
+#ifdef CONFIG_MACH_P6_REV02
+#define	MAX_VF_ADC	2100
+#define	MIN_VF_ADC	2000
+#define	ADC_CH_VF	1
+#endif
 #endif
 #endif
 #define FULL_CHARGING_TIME	(6 * 60 *  60 * HZ)	/* 6hr */
@@ -325,6 +330,7 @@ struct sec_bat_info {
 #endif
 #if defined(CONFIG_TARGET_LOCALE_NAATT)
 	bool (*get_recording_state)(void);
+	int (*get_current_cable_type_is_jig)(void);
 #endif
 	int batt_tmu_status;
 };
@@ -465,6 +471,7 @@ static int sec_bat_get_property(struct power_supply *ps,
 			break;
 		}
 #endif /*CONFIG_TARGET_LOCALE_NA*/
+
 		if (info->charging_status == POWER_SUPPLY_STATUS_FULL) {
 			val->intval = 100;
 			break;
@@ -1100,6 +1107,11 @@ static int sec_bat_check_temper(struct sec_bat_info *info)
 		}
 	}
 
+	if (info->cable_type == CABLE_TYPE_NONE) {
+			info->batt_temp_high_cnt = 0;
+			info->batt_temp_low_cnt = 0;
+	}
+
 	if (info->batt_temp_high_cnt >= TEMP_BLOCK_COUNT)
 		info->batt_health = POWER_SUPPLY_HEALTH_OVERHEAT;
 	else if (info->batt_temp_low_cnt >= TEMP_BLOCK_COUNT)
@@ -1559,6 +1571,9 @@ static void sec_bat_check_vf_adc(struct sec_bat_info *info)
 	int adc;
 	static int invalid_vf_count;
 
+	if( info->get_current_cable_type_is_jig())
+		return;
+
 	if (system_rev == 11)
 		return;
 
@@ -1574,6 +1589,7 @@ static void sec_bat_check_vf_adc(struct sec_bat_info *info)
 	if ((info->batt_vf_adc > MAX_VF || info->batt_vf_adc < MIN_VF)
 		&& ((info->cable_type == CABLE_TYPE_AC)
 		|| info->cable_type == CABLE_TYPE_USB)) {
+
 		invalid_vf_count++;
 
 		printk(KERN_DEBUG "[%s] invalid VF is detected... (vf = %d, count = %d)\n",
@@ -1598,6 +1614,20 @@ static void sec_bat_check_vf(struct sec_bat_info *info)
 	union power_supply_propval value;
 	int ret;
 
+#ifdef CONFIG_MACH_P6_REV02
+	int adc;
+
+	mutex_lock(&info->adclock);
+	adc = sec_bat_get_adc_data(info, ADC_CH_VF);
+	mutex_unlock(&info->adclock);
+
+	dev_info(info->dev,  "%s: adc (%d)\n",  __func__, adc);
+
+	if (adc > MAX_VF_ADC || adc < MIN_VF_ADC)
+		value.intval = BAT_NOT_DETECTED;
+	else
+		value.intval = BAT_DETECTED;
+#else
 	ret = psy->get_property(psy, POWER_SUPPLY_PROP_PRESENT, &value);
 
 	if (ret < 0) {
@@ -1605,6 +1635,7 @@ static void sec_bat_check_vf(struct sec_bat_info *info)
 			__func__, ret);
 		return;
 	}
+#endif
 
 	if (value.intval == BAT_NOT_DETECTED) {
 		if (info->present_count < BAT_DET_COUNT)
@@ -1996,11 +2027,11 @@ static struct device_attribute sec_battery_attrs[] = {
 #endif
 #if defined(CONFIG_TARGET_LOCALE_NAATT)
 	SEC_BATTERY_ATTR(batt_v_f_adc),
-	SEC_BATTERY_ATTR(talk_gsm),
-	SEC_BATTERY_ATTR(talk_wcdma),
-	SEC_BATTERY_ATTR(data_call),
+	SEC_BATTERY_ATTR(batt_voice_call_2g),
+	SEC_BATTERY_ATTR(batt_voice_call_3g),
+	SEC_BATTERY_ATTR(batt_data_call),
 	SEC_BATTERY_ATTR(wifi),
-	SEC_BATTERY_ATTR(gps),
+	SEC_BATTERY_ATTR(batt_gps),
 	SEC_BATTERY_ATTR(camera),
 #elif CONFIG_TARGET_LOCALE_NA
 	SEC_BATTERY_ATTR(call),
@@ -2617,6 +2648,7 @@ static __devinit int sec_bat_probe(struct platform_device *pdev)
 #if defined(CONFIG_TARGET_LOCALE_NAATT)
 	info->vf_adc_channel = pdata->adc_vf_channel;
 	info->get_recording_state = pdata->get_recording_state;
+	info->get_current_cable_type_is_jig = pdata->get_current_cable_type_is_jig;
 #endif
 
 	info->psy_bat.name = "battery",

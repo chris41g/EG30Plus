@@ -2389,10 +2389,14 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 #endif
 
 #if (defined(CONFIG_MACH_SAMSUNG_P3) && defined(CHECK_CHIP_REV)) || defined(CONFIG_MACH_C1) || defined(CONFIG_MACH_N1)
-	if(g_chipver == 2) {
+	if (g_chipver == 2) {
 		DHD_ERROR(("---------------- CHIP bcm4330_B0 --------------------- \r\n"));
 		strcat(fw_path, "_b0");
 		strcat(nv_path, "_b0");
+	} else if (g_chipver == 4) {
+		DHD_ERROR(("---------------- CHIP bcm4330_B2 --------------------- \r\n"));
+		strcat(fw_path, "_b2");
+		strcat(nv_path, "_b2");
 	}
 #endif
 

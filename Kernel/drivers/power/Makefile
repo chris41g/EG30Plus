@@ -53,3 +53,4 @@ endif
 
 obj-$(CONFIG_MAX8997_CHARGER)	+= max8997-charger.o
 obj-$(CONFIG_MAX8922_CHARGER)	+= max8922-charger.o
+obj-$(CONFIG_SMB136_CHARGER)	+= smb136_charger.o
